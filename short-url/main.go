@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"github.com/json-iterator/go"
 	"net/http"
 	"os"
 
@@ -16,6 +17,11 @@ import (
 type Response events.APIGatewayProxyResponse
 
 var db *dynamodb.DynamoDB
+
+type URLInOut struct {
+	URL   string `json:"url"`
+	Alias string `json:"alias"`
+}
 
 func Handler(ctx context.Context, req events.APIGatewayProxyRequest) (Response, error) {
 	var resp Response
@@ -37,7 +43,15 @@ func Handler(ctx context.Context, req events.APIGatewayProxyRequest) (Response, 
 }
 
 func PostHandler(ctx context.Context, req events.APIGatewayProxyRequest) (Response, error) {
-	URL := req.Body
+	URL := new(URLInOut)
+	err := jsoniter.UnmarshalFromString(req.Body, URL)
+	if err != nil {
+		log.Debugf("failed to unmarshal %s", req.Body)
+		return Response{
+			StatusCode: http.StatusBadRequest,
+		}, err
+	}
+
 	short, ok := req.PathParameters["short_url"]
 	if !ok {
 		return Response{
@@ -45,11 +59,11 @@ func PostHandler(ctx context.Context, req events.APIGatewayProxyRequest) (Respon
 		}, nil
 	}
 
-	_, err := db.PutItemWithContext(ctx, &dynamodb.PutItemInput{
+	_, err = db.PutItemWithContext(ctx, &dynamodb.PutItemInput{
 		TableName: aws.String(os.Getenv("DYNAMO_DB_TABLE")),
 		Item: map[string]*dynamodb.AttributeValue{
 			"alias": {S: aws.String(short)},
-			"url":   {S: aws.String(URL)},
+			"url":   {S: aws.String(URL.URL)},
 		}})
 	if err != nil {
 		log.Debug(err)
@@ -59,9 +73,21 @@ func PostHandler(ctx context.Context, req events.APIGatewayProxyRequest) (Respon
 		}, err
 	}
 
+	URL.Alias = short
+	respBody, err := jsoniter.MarshalToString(URL)
+	if err != nil {
+		log.Fatalf("Failed to marshal %s", short)
+		return Response{
+			StatusCode: 400,
+		}, err
+	}
+
 	return Response{
 		StatusCode: http.StatusOK,
-		Body:       "Short URL - " + short + " added",
+		Body:       respBody,
+		Headers: map[string]string{
+			"Content-Type": "application/json",
+		},
 	}, nil
 }
 
@@ -96,9 +122,24 @@ func GetHandler(ctx context.Context, req events.APIGatewayProxyRequest) (Respons
 		}, err
 	}
 
+	URL := &URLInOut{
+		URL:   aws.StringValue(originalURL.S),
+		Alias: short,
+	}
+	respBody, err := jsoniter.MarshalToString(URL)
+	if err != nil {
+		log.Fatalf("Failed to marshal %s", URL)
+		return Response{
+			StatusCode: 400,
+		}, err
+	}
+
 	return Response{
 		StatusCode: http.StatusOK,
-		Body:       "Original URL - " + aws.StringValue(originalURL.S),
+		Body:       respBody,
+		Headers: map[string]string{
+			"Content-Type": "application/json",
+		},
 	}, nil
 }
 

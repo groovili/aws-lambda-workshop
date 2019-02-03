@@ -1,34 +1,44 @@
 package main
 
 import (
-	"context"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
+	"github.com/json-iterator/go"
 	log "github.com/sirupsen/logrus"
+	"net/http"
 )
 
-// Response is of type APIGatewayProxyResponse since we're leveraging the
-// AWS Lambda Proxy Request functionality (default behavior)
-//
-// https://serverless.com/framework/docs/providers/aws/events/apigateway/#lambda-proxy-integration
 type Response events.APIGatewayProxyResponse
 
-// Handler is our lambda handler invoked by the `lambda.Start` function call
-func Handler(ctx context.Context, req events.APIGatewayProxyRequest) (Response, error) {
+type Message struct {
+	Message string `json:"message"`
+}
+
+func Handler(req events.APIGatewayProxyRequest) (Response, error) {
 	name, ok := req.QueryStringParameters["name"]
-	if !ok{
+	if !ok {
 		name = "John Doe"
 	}
 
-	log.Infoln("Hello, ", name)
+	msg := &Message{Message: "Hello, " + name}
+
+	log.Infoln(msg)
+
+	m, err := jsoniter.MarshalToString(msg)
+	if err != nil {
+		log.Debugf("Failed to marshal %s", msg)
+		return Response{
+			StatusCode: http.StatusBadRequest,
+		}, err
+	}
 
 	resp := Response{
-		StatusCode:      200,
+		StatusCode:      http.StatusOK,
 		IsBase64Encoded: false,
 		Headers: map[string]string{
-			"Content-Type":           "application/json",
-			"X-MyCompany-Func-Reply": "hello-handler",
+			"Content-Type": "application/json",
 		},
+		Body: m,
 	}
 
 	return resp, nil
